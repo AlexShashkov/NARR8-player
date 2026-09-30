@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0e0e10">
+  <title>NARR8 Player</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ============================== Library ============================== -->
+  <main id="library">
+    <header class="lib-head">
+      <div class="brand">
+        <span class="logo">NARR<b>8</b></span>
+        <span class="tag">motion comics player</span>
+      </div>
+      <div id="lib-toolbar" class="lib-toolbar" hidden>
+        <div class="folder-info">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M10 4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h6z"/></svg>
+          <span><strong id="folder-name"></strong> <span id="folder-count" class="muted"></span></span>
+        </div>
+        <button class="btn small" id="change-btn">Change folder…</button>
+      </div>
+    </header>
+
+    <!-- First run: no folder chosen yet -->
+    <section id="onboarding" class="onboarding" hidden>
+      <div class="onb-card">
+        <div class="onb-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="44" height="44"><path fill="currentColor" d="M10 4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h6zm1 6v3H8l4 4 4-4h-3v-3h-2z"/></svg>
+        </div>
+        <div id="pick-intro">
+          <h1>Select your comics folder</h1>
+          <p class="muted">Pick the folder that holds your NARR8 episodes. Series folders, episode <code>.zip</code> files and cover images inside it are found automatically — nothing is uploaded or copied.</p>
+          <pre class="tree" aria-label="Example folder layout">comics/
+├─ Prodigal Angel/
+│  ├─ Episodes/        Prodigal Angel.Ep_01.….zip …
+│  └─ Episode covers/  Prodigal Angel.ep01.jpg …
+├─ Jam/
+└─ Subject 9/</pre>
+          <button class="btn primary big" id="choose-btn">Select comics folder…</button>
+          <p class="fine muted">Can't pick folders on this device? <a href="#" id="files-link">Select episode files instead</a>.</p>
+        </div>
+        <div id="reconnect" hidden>
+          <h1>Welcome back</h1>
+          <p class="muted">Allow the player to read your comics folder <strong id="reconnect-name"></strong> again.</p>
+          <div class="onb-actions">
+            <button class="btn primary big" id="reconnect-btn">Open folder</button>
+            <button class="btn big ghost" id="choose-other-btn">Choose another folder…</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <input id="folder-input" type="file" webkitdirectory directory multiple hidden>
+    <input id="files-input" type="file" accept=".zip,application/zip,image/jpeg,image/png" multiple hidden>
+
+    <div id="lib-loading" class="lib-loading" hidden><div class="spinner"></div><span class="muted">Opening folder…</span></div>
+
+    <section id="scan-status" class="import-status" hidden>
+      <div class="imp-row"><span id="scan-label">Reading episodes…</span></div>
+      <div class="bar"><div id="scan-bar"></div></div>
+    </section>
+
+    <section id="shelf" class="shelf" hidden></section>
+
+    <footer class="lib-foot muted">
+      <span>Keys: <kbd>→</kbd>/<kbd>Space</kbd> next · <kbd>←</kbd> previous · <kbd>C</kbd> contents · <kbd>Esc</kbd> menu · <kbd>F</kbd> fullscreen</span>
+    </footer>
+  </main>
+
+  <!-- ============================== Player ============================== -->
+  <section id="player" hidden>
+    <div id="stage">
+      <iframe id="frame" title="Episode" allow="autoplay; fullscreen" allowfullscreen></iframe>
+    </div>
+
+    <button id="menu-btn" class="menu-btn" aria-label="Menu">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+    </button>
+
+    <div id="loading" class="loading"><div class="spinner"></div></div>
+
+    <!-- Menu drawer (the engine's "home" button and Esc open it) -->
+    <div id="menu" class="sheet" hidden>
+      <div class="sheet-card">
+        <div class="sheet-head">
+          <div>
+            <div id="menu-title" class="sheet-title"></div>
+            <div id="menu-sub" class="muted"></div>
+          </div>
+          <button class="icon-btn" data-close aria-label="Close">✕</button>
+        </div>
+        <div class="menu-actions">
+          <button class="btn" id="m-resume">Continue</button>
+          <button class="btn" id="m-contents">Contents</button>
+          <button class="btn" id="m-restart">Start over</button>
+          <button class="btn" id="m-fullscreen">Fullscreen</button>
+          <label class="lang-pick">Language
+            <select id="m-lang"></select>
+          </label>
+          <button class="btn ghost" id="m-exit">Back to library</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Contents (the engine's "contents" button opens it) -->
+    <div id="contents" class="sheet" hidden>
+      <div class="sheet-card wide">
+        <div class="sheet-head">
+          <div class="sheet-title">Contents</div>
+          <button class="icon-btn" data-close aria-label="Close">✕</button>
+        </div>
+        <div id="contents-grid" class="contents-grid"></div>
+      </div>
+    </div>
+
+    <!-- End of episode -->
+    <div id="endcard" class="endcard" hidden>
+      <div class="end-title">End of episode</div>
+      <div class="end-actions">
+        <button class="btn primary" id="e-next" hidden>Next episode ›</button>
+        <button class="btn" id="e-replay">Replay</button>
+        <button class="btn ghost" id="e-exit">Library</button>
+      </div>
+    </div>
+
+    <div id="error" class="error" hidden></div>
+  </section>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="db.js"></script>
+  <script src="zip.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

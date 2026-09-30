@@ -141,3 +141,10 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# macOS
+.DS_Store
+
+# Comics are yours: keep the folder, not its contents
+comics/*
+!comics/.gitkeep
