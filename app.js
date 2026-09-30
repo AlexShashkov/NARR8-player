@@ -494,7 +494,7 @@
       $("library").hidden = true;
       player.hidden = false;
       $("loading").classList.remove("done");
-      $("endcard").hidden = true;
+      hideEndCard(true);
       $("error").hidden = true;
       closeSheets(true);
       if (!history.state || !history.state.player) history.pushState({ player: ep.id }, "", "#play/" + encodeURIComponent(ep.id));
@@ -508,6 +508,7 @@
 
   function closePlayer(fromPopState) {
     if (!S) return;
+    hideEndCard(true);
     frame.src = "about:blank";
     S = null;
     blobCache = {};
@@ -609,7 +610,7 @@
       if (!S) return;
       S.current = n;
       if (count) S.count = count;
-      if (n < S.count - 1) { S.ended = false; $("endcard").hidden = true; }
+      if (n < S.count - 1 && S.ended) { S.ended = false; hideEndCard(false); }
       saveProgress(false);
     },
     sectionFinished: function (n) {
@@ -672,10 +673,17 @@
         var img = el("img");
         img.loading = "lazy";
         img.alt = "";
-        if (images[i]) img.src = base + images[i];
-        b.appendChild(img);
         var name = meta.scenes && meta.scenes[i] ? meta.scenes[i].name : "";
-        b.appendChild(el("span", "", i === 0 ? "Cover" : (name || String(i))));
+        if (images[i]) {
+          img.src = base + images[i];
+          b.appendChild(img);
+          b.appendChild(el("span", "", i === 0 ? "Cover" : (name || String(i))));
+        } else if (i === count - 1) {
+          b.appendChild(el("div", "end-ph", "END"));
+        } else {
+          b.appendChild(img);
+          b.appendChild(el("span", "", i === 0 ? "Cover" : (name || String(i))));
+        }
         b.onclick = function () { jumpTo(i); };
         grid.appendChild(b);
       })(i);
@@ -689,7 +697,7 @@
   function jumpTo(i) {
     closeSheets(false);
     if (!S || !S.nav || i === S.current) return;
-    $("endcard").hidden = true;
+    hideEndCard(false);
     S.nav.jumpToSection(i);
   }
 
@@ -700,13 +708,72 @@
     return i >= 0 && i + 1 < group.episodes.length ? group.episodes[i + 1] : null;
   }
 
+  // Closing lines for the end-of-episode panel; one is picked at random each time an episode ends.
+  var END_LINES = [
+    "Every story needs a pause. This one is only catching its breath.",
+    "The last page turns, but the characters keep living somewhere between the frames.",
+    "Stories don't end. They wait for someone to come back to them.",
+    "Somewhere, a pencil is already sketching what happens next.",
+    "You made it to the final frame. The characters will remember that.",
+    "Take a breath. The next chapter is patient.",
+    "Ten years in an archive, and this episode still found its reader.",
+    "Some stories are over when the credits roll. The good ones stay in your head a little longer.",
+    "The panels are quiet now, but the story is still turning in someone's head.",
+    "Every ending is just a cliffhanger that hasn't been drawn yet.",
+    "Thank you for reading. Somewhere, the artists who drew this would be glad.",
+    "The frame freezes here. Your imagination doesn't have to.",
+    "That's a wrap for now. Grab a snack, then see what happens next.",
+    "Motion comics were a small miracle of their time, and this one just played again.",
+    "The music fades, the balloons empty, and the story waits for its next reader.",
+    "You reached the end. Not everyone who started this episode did.",
+    "Heroes rest, villains plot, and the next episode is one tap away.",
+    "Every frame here was drawn by hand, a long time ago, for someone exactly like you.",
+    "End of the line for this episode. The tracks keep going.",
+    "Some stories deserve a second read. This might be one of them."
+  ];
+  var lastLine = -1, typeTimer = null, endHideTimer = null;
+
+  function typeLine(text) {
+    var box = $("end-quote"), quote = box.parentNode, i = 0;
+    clearInterval(typeTimer);
+    box.textContent = "";
+    quote.classList.remove("typed");
+    setTimeout(function () {
+      typeTimer = setInterval(function () {
+        box.textContent = text.slice(0, ++i);
+        if (i >= text.length) { clearInterval(typeTimer); quote.classList.add("typed"); }
+      }, 22);
+    }, 650);                                   // start once the panel has slid in
+  }
+
   function showEndCard() {
+    if (!S) return;
     var next = nextEpisode(S.ep);
     var btn = $("e-next");
     btn.hidden = !next;
     if (next) btn.textContent = "Next: " + next.title + " ›";
     btn.onclick = next ? function () { openEpisode(next, { section: 0 }); } : null;
-    $("endcard").hidden = false;
+    $("end-series").textContent = S.ep.series;
+    $("end-number").textContent = S.ep.episode !== null ? pad2(S.ep.episode) : "";
+    var n;
+    do { n = Math.floor(Math.random() * END_LINES.length); } while (n === lastLine && END_LINES.length > 1);
+    lastLine = n;
+    clearTimeout(endHideTimer);
+    var panel = $("endcard");
+    panel.hidden = false;
+    void panel.offsetWidth;                    // start the slide-in from the off-screen position
+    player.classList.add("ended");
+    typeLine(END_LINES[n]);
+    setTimeout(function () { if (!panel.hidden) (next ? btn : $("e-replay")).focus({ preventScroll: true }); }, 700);
+  }
+
+  function hideEndCard(immediate) {
+    var panel = $("endcard");
+    clearInterval(typeTimer);
+    clearTimeout(endHideTimer);
+    player.classList.remove("ended");
+    if (immediate) { panel.hidden = true; return; }
+    endHideTimer = setTimeout(function () { panel.hidden = true; }, 800);
   }
 
   function toggleFullscreen() {
@@ -722,7 +789,9 @@
     if (!S) return;
     var menuOpen = !$("menu").hidden || !$("contents").hidden;
     if (e.key === "Escape") {
-      if (menuOpen) closeSheets(false); else openMenu();
+      if (menuOpen) closeSheets(false);
+      else if (!$("endcard").hidden && player.classList.contains("ended")) hideEndCard(false);
+      else openMenu();
       e.preventDefault();
     } else if ((e.key === "f" || e.key === "F") && !e.metaKey && !e.ctrlKey) {
       toggleFullscreen();
@@ -761,6 +830,7 @@
   });
   $("e-replay").addEventListener("click", function () { if (S) openEpisode(S.ep, { section: 0, lang: S.lang }); });
   $("e-exit").addEventListener("click", function () { closePlayer(); });
+  $("e-close").addEventListener("click", function () { hideEndCard(false); frame.focus(); });
 
   // Scriptable entry points (handy for debugging from the console and for automated tests).
   window.narr8 = {
