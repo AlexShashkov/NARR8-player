@@ -50,7 +50,7 @@ You need a web browser and any static web server. Python 3 is already installed 
    ```
    Any static server works, for example `npx serve -l 8080`. Opening `index.html` directly as a file does **not** work: the player needs `http://localhost` or `https://` for its Service Worker.
 
-4. **Open <http://localhost:8080>**, click **Select comics folder…**, and choose the `comics` folder.
+4. **Open <http://localhost:8080/narr8-player/>**, click **Select comics folder…**, and choose the `comics` folder.
 
    Nothing is uploaded or copied. The player reads each episode straight from its zip on your disk while you watch.
 
