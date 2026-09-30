@@ -1,4 +1,4 @@
-# narr8-reader
+# WORKING NARR8 PLAYER
 Web app that can launch NARR8 comics
 
 App is fully vibe coded. I don't claim any part of the reverse-engineered code, you are free to use it however you want.
