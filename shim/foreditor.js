@@ -56,7 +56,19 @@
         aspect: data.settings.width / data.settings.height,
         sceneCount: function () { return mi.scenes.length; },
         currentScene: function () { return mi.scene; },
-        forward: function () { mi.fireEvent("externalPlayForward"); },
+        forward: function () {
+          var subs = mi.subscribtions && mi.subscribtions.externalPlayForward;
+          if (subs && subs.length) { mi.fireEvent("externalPlayForward"); return; }
+          // Builds before ~2.15 have no "externalPlayForward" hook: press the engine's own forward arrow
+          // (bottom-right corner) with a synthetic click, which takes exactly the path of a real one.
+          var layer = mi.interactionController && mi.interactionController.view;
+          if (!layer) return;
+          var r = layer.getBoundingClientRect();
+          var opts = { bubbles: true, cancelable: true, view: window, button: 0,
+            clientX: r.left + r.width * 0.96, clientY: r.top + r.height * 0.95 };
+          layer.dispatchEvent(new MouseEvent("mousedown", opts));
+          layer.dispatchEvent(new MouseEvent("mouseup", opts));
+        },
         back: function () { if (!mi.jumped) mi.goToPrevScene(); },
         pause: function () { mi.pause(); },
         resume: function () { mi.resume(); },
@@ -154,6 +166,11 @@
   }
   HTMLMediaElement.prototype.play = function () {
     var el = this;
+    // Pauses are often placed on a scene video's very last frame. Seeking there leaves the browser's `ended`
+    // flag set, and play() on an ended element restarts it from 0, so tapping "next" replayed the whole scene.
+    // The native players simply finished the scene: leave it ended, and both engines' video loops then see
+    // `ended` and move on to the next scene. (Audio is not affected: sound effects rely on restart-on-play.)
+    if (el.ended && !el.loop && el instanceof HTMLVideoElement) return Promise.resolve();
     var p = originalPlay.apply(el, arguments);
     if (p && typeof p.catch === "function") {
       p.catch(function (err) {
