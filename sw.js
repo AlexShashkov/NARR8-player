@@ -6,9 +6,12 @@
 //
 // The page answers "narr8-file" messages (see app.js). Keeping the File handles in the page, not here, means the
 // browser can stop this worker whenever it likes without losing anything.
-var SHELL_CACHE = "narr8-shell-v2";
+var SHELL_CACHE = "narr8-shell-v3";
 var SHELL_FILES = ["./", "index.html", "app.js", "zip.js", "db.js", "style.css",
-  "shim/navigation.js", "shim/foreditor.js", "shim/video.js", "shim/mouse.js"];
+  "shim/navigation.js", "shim/foreditor.js", "shim/video.js", "shim/mouse.js", "shim/audioController.js"];
+
+// Engine files that some episodes left out of their zip; served from the player instead (see shim/audioController.js).
+var ENGINE_FALLBACKS = { "utils/audioController.js": "shim/audioController.js" };
 
 var MIME = {
   html: "text/html; charset=utf-8", htm: "text/html; charset=utf-8",
@@ -95,12 +98,7 @@ function serveComicFile(request, rest) {
   var path = decodeURIComponent(rest.slice(slash + 1));
 
   // The NARR8 web player's own files were never shipped inside episodes; substitute our shim.
-  if (path.indexOf("foreditor/") === 0) {
-    var shimUrl = new URL("shim/" + path.slice("foreditor/".length), self.registration.scope);
-    return fetch(shimUrl).then(function (r) { return r.ok ? r : caches.match(shimUrl.href); })
-      .catch(function () { return caches.match(shimUrl.href); })
-      .then(function (r) { return r || notFound(path); });
-  }
+  if (path.indexOf("foreditor/") === 0) return serveShim("shim/" + path.slice("foreditor/".length), path);
 
   return askPages(id, path).then(function (blob) {
     if (blob) return blob;
@@ -109,9 +107,16 @@ function serveComicFile(request, rest) {
     if (alt === path) return null;
     return askPages(id, alt).then(function (b) { if (b) path = alt; return b; });
   }).then(function (blob) {
-    if (!blob) return notFound(path);
+    if (!blob) return ENGINE_FALLBACKS[path] ? serveShim(ENGINE_FALLBACKS[path], path) : notFound(path);
     return blobResponse(request, blob, MIME[extOf(path)] || "application/octet-stream");
   });
+}
+
+function serveShim(shimPath, requested) {
+  var shimUrl = new URL(shimPath, self.registration.scope);
+  return fetch(shimUrl).then(function (r) { return r.ok ? r : caches.match(shimUrl.href); })
+    .catch(function () { return caches.match(shimUrl.href); })
+    .then(function (r) { return r || notFound(requested); });
 }
 
 function blobResponse(request, blob, type) {
