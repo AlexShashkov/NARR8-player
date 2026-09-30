@@ -1,4 +1,10 @@
 # WORKING NARR8 PLAYER
+
+[CLICK HERE TO LAUNCH](https://alexshashkov.github.io/NARR8-player/)
+
+https://alexshashkov.github.io/NARR8-player/
+
+
 Web app that can launch NARR8 comics
 
 App is fully vibe coded. I don't claim any part of the reverse-engineered code, you are free to use it however you want.
