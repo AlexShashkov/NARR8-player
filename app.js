@@ -493,6 +493,17 @@
       };
       $("library").hidden = true;
       player.hidden = false;
+      if (opts.viaScroll) {
+        // the next episode's cover card is covering the screen: snap the slid-away stage back behind it
+        var stage = $("stage");
+        stage.style.transition = "none";
+        player.classList.remove("to-next");
+        void stage.offsetWidth;
+        stage.style.transition = "";
+      } else {
+        hideNextPeek();
+      }
+      updateNextHint();
       $("loading").classList.remove("done");
       hideEndCard(true);
       $("error").hidden = true;
@@ -509,8 +520,10 @@
   function closePlayer(fromPopState) {
     if (!S) return;
     hideEndCard(true);
+    hideNextPeek();
     frame.src = "about:blank";
     S = null;
+    updateNextHint();
     blobCache = {};
     cacheOwner = null;
     closeSheets(true);
@@ -604,12 +617,16 @@
         clearTimeout(hideTimer);
         hideTimer = setTimeout(function () { player.classList.remove("show-ui"); }, 2200);
       });
+      win.addEventListener("wheel", onWheel, { passive: true });
+      attachSwipeUp(win);
     },
     engineIsReady: function (nav) {
       if (!S) return false;
       S.nav = nav;
       if (S.adapter) S.count = S.adapter.sceneCount() || S.count;
       $("loading").classList.add("done");
+      revealAfterScroll();
+      updateNextHint();
       var ep = S.ep;
       return {
         sectionNumber: Math.min(S.startSection || 0, Math.max(0, S.count - 1)),
@@ -621,6 +638,7 @@
     },
     engineError: function (msg) {
       $("loading").classList.add("done");
+      hideNextPeek();
       var box = $("error");
       box.textContent = "The episode's engine failed to start.\n\n" + msg;
       box.hidden = false;
@@ -629,6 +647,7 @@
       if (!S) return;
       S.current = n;
       if (count) S.count = count;
+      updateNextHint();
       saveProgress(false);
       if (S.count && n === S.count - 1) {
         if (!S.endTimer && !S.ended) scheduleEndPanel();
@@ -655,6 +674,7 @@
     $("menu").hidden = true;
     $("contents").hidden = true;
     if (wasOpen && !silent) { resumeEngine(); frame.focus(); }
+    updateNextHint();
   }
 
   function openMenu() {
@@ -677,6 +697,7 @@
     $("m-fullscreen").hidden = !(player.requestFullscreen || player.webkitRequestFullscreen);
     pauseEngine();
     $("menu").hidden = false;
+    updateNextHint();
     $("m-resume").focus();
   }
 
@@ -714,6 +735,7 @@
     }
     pauseEngine();
     $("contents").hidden = false;
+    updateNextHint();
     var cur = grid.querySelector(".current");
     if (cur) { cur.scrollIntoView({ block: "center" }); cur.focus(); }
   }
@@ -914,7 +936,7 @@
     "The Sphinx corporation would pay a fortune for Max's gift. Luckily, this episode costs nothing.",
     "Even a mafia boss stops for Christmas dinner. Dave did once. You can take a break now too.",
     "Ray was an actor with nothing but debts. He'd have loved an audience like you.",
-    "Somewhere out there is a free New Year special from the winter of 2012, when the app had just launched. Nobody seems to have kept a copy. If it's still sitting on an old tablet, it deserves a folder like this one.",
+    "Somewhere out there is a free New Year special from the winter of 2012(3?), when the app had just launched. Nobody seems to have kept a copy. If it's still sitting on an old tablet, it deserves a folder like this one.",
     // Claude
     "Claude rebuilt the missing player pieces for this. Claude would like you to know it read along.",
     "Claude never saw these comics in 2013. It is glad it got to see them now.",
@@ -989,8 +1011,103 @@
       toggleFullscreen();
     } else if ((e.key === "c" || e.key === "C") && !menuOpen && !e.metaKey && !e.ctrlKey) {
       openContents();
+    } else if (e.key === "ArrowDown" && !menuOpen) {
+      if (scrollToNextEpisode()) e.preventDefault();
     }
   }
+
+  // ------------------------------------------------------------------ cover -> next episode
+  // On an episode's first scene, scrolling down (wheel, ↓, swipe up) glides to the next episode: the current one
+  // slides up and away while the next one's cover slides in from below and covers the screen until it is ready.
+
+  var peekUrl = null;
+
+  function scrollTarget() {
+    if (!S || !S.nav || S.switching || S.current !== 0) return null;
+    if (!$("menu").hidden || !$("contents").hidden) return null;
+    return nextEpisode(S.ep);
+  }
+
+  function updateNextHint() {
+    var hint = $("next-hint"), next = scrollTarget();
+    if (next) {
+      $("next-hint-text").textContent = "Next: " + next.title;
+      if (hint.hidden) {
+        hint.hidden = false;
+        requestAnimationFrame(function () { hint.classList.add("show"); });
+      }
+    } else {
+      hint.classList.remove("show");
+      hint.hidden = true;
+    }
+  }
+
+  function scrollToNextEpisode() {
+    var next = scrollTarget();
+    if (!next) return false;
+    S.switching = true;
+    updateNextHint();
+    pauseEngine();
+    var peek = $("next-peek"), img = $("next-peek-img");
+    if (peekUrl) { URL.revokeObjectURL(peekUrl); peekUrl = null; }
+    var src = next.cover || (next.meta && next.meta.cover);
+    if (src) { peekUrl = URL.createObjectURL(src); img.src = peekUrl; img.hidden = false; } else img.hidden = true;
+    img.style.width = frame.style.width;
+    img.style.height = frame.style.height;
+    $("np-series").textContent = next.series;
+    $("np-title").textContent = next.title;
+    peek.classList.remove("fade", "in");
+    peek.hidden = false;
+    void peek.offsetWidth;
+    peek.classList.add("in");
+    player.classList.add("to-next");
+    setTimeout(function () { openEpisode(next, { section: 0, viaScroll: true }); }, 800);
+    return true;
+  }
+
+  function revealAfterScroll() {
+    var peek = $("next-peek");
+    if (peek.hidden) return;
+    peek.classList.add("fade");
+    setTimeout(hideNextPeek, 520);
+  }
+
+  function hideNextPeek() {
+    var peek = $("next-peek");
+    peek.hidden = true;
+    peek.classList.remove("in", "fade");
+    player.classList.remove("to-next");
+    if (peekUrl) { URL.revokeObjectURL(peekUrl); peekUrl = null; }
+  }
+
+  var wheelSum = 0, wheelTimer = null;
+  function onWheel(e) {
+    if (!S) return;
+    var dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+    if (dy <= 0) { wheelSum = 0; return; }
+    wheelSum += dy;                      // trackpads send many small deltas: add them up
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(function () { wheelSum = 0; }, 250);
+    if (wheelSum > 60) { wheelSum = 0; scrollToNextEpisode(); }
+  }
+
+  function attachSwipeUp(target) {
+    var sx, sy, st;
+    target.addEventListener("touchstart", function (e) {
+      var t = e.touches[0];
+      sx = t.clientX; sy = t.clientY; st = Date.now();
+    }, { capture: true, passive: true });
+    target.addEventListener("touchend", function (e) {
+      if (sy === undefined) return;
+      var t = e.changedTouches[0], dy = sy - t.clientY, dx = Math.abs(t.clientX - sx);
+      sy = undefined;
+      if (dy > 60 && dx < dy * 0.6 && Date.now() - st < 800) scrollToNextEpisode();
+    }, { capture: true, passive: true });
+  }
+
+  player.addEventListener("wheel", onWheel, { passive: true });
+  attachSwipeUp(player);
+  $("next-hint").addEventListener("click", function () { scrollToNextEpisode(); });
   document.addEventListener("keydown", function (e) {
     if (!S) return;
     // keys while focus is in the host page rather than inside the episode frame

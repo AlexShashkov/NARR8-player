@@ -82,6 +82,16 @@
 
     <div id="loading" class="loading"><div class="spinner"></div></div>
 
+    <!-- On an episode's first scene: scroll down / ↓ / swipe up glides to the next episode -->
+    <button id="next-hint" class="next-hint" hidden>
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 16.6l-7.3-7.3 1.4-1.4 5.9 5.9 5.9-5.9 1.4 1.4z"/></svg>
+      <span id="next-hint-text"></span>
+    </button>
+    <div id="next-peek" class="next-peek" hidden aria-hidden="true">
+      <img id="next-peek-img" alt="">
+      <div class="np-label"><span id="np-series"></span><strong id="np-title"></strong></div>
+    </div>
+
     <!-- Menu drawer (the engine's "home" button and Esc open it) -->
     <div id="menu" class="sheet" hidden>
       <div class="sheet-card">
