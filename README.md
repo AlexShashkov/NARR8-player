@@ -97,3 +97,7 @@ The rest of the app:
 - `db.js`: remembers the chosen folder and caches scan results in IndexedDB.
 
 No episode file is modified; the original engine runs untouched in an iframe.
+
+P.S.
+
+# FUCK YOU, MAIL.RU!
