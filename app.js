@@ -494,10 +494,10 @@
       $("library").hidden = true;
       player.hidden = false;
       if (opts.viaScroll) {
-        // the next episode's cover card is covering the screen: snap the slid-away stage back behind it
+        // the new episode's cover card is covering the screen: snap the slid-away stage back behind it
         var stage = $("stage");
         stage.style.transition = "none";
-        player.classList.remove("to-next");
+        player.classList.remove("to-next", "to-prev");
         void stage.offsetWidth;
         stage.style.transition = "";
       } else {
@@ -1011,25 +1011,33 @@
       toggleFullscreen();
     } else if ((e.key === "c" || e.key === "C") && !menuOpen && !e.metaKey && !e.ctrlKey) {
       openContents();
-    } else if (e.key === "ArrowDown" && !menuOpen) {
-      if (scrollToNextEpisode()) e.preventDefault();
+    } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !menuOpen) {
+      if (scrollToEpisode(e.key === "ArrowDown" ? 1 : -1)) e.preventDefault();
     }
   }
 
-  // ------------------------------------------------------------------ cover -> next episode
-  // On an episode's first scene, scrolling down (wheel, ↓, swipe up) glides to the next episode: the current one
-  // slides up and away while the next one's cover slides in from below and covers the screen until it is ready.
+  // ------------------------------------------------------------------ cover -> next / previous episode
+  // On an episode's first scene, scrolling down (wheel, ↓, swipe up) glides to the next episode and scrolling up
+  // (wheel, ↑, swipe down) to the previous one: the current episode slides away while the other one's cover
+  // slides in and covers the screen until that episode is ready.
 
   var peekUrl = null;
 
-  function scrollTarget() {
+  function prevEpisode(ep) {
+    var group = library.series.filter(function (g) { return g.name.toLowerCase() === ep.series.toLowerCase(); })[0];
+    if (!group) return null;
+    var i = group.episodes.indexOf(ep);
+    return i > 0 ? group.episodes[i - 1] : null;
+  }
+
+  function scrollTarget(dir) {
     if (!S || !S.nav || S.switching || S.current !== 0) return null;
     if (!$("menu").hidden || !$("contents").hidden) return null;
-    return nextEpisode(S.ep);
+    return dir < 0 ? prevEpisode(S.ep) : nextEpisode(S.ep);
   }
 
   function updateNextHint() {
-    var hint = $("next-hint"), next = scrollTarget();
+    var hint = $("next-hint"), next = scrollTarget(1);
     if (next) {
       $("next-hint-text").textContent = "Next: " + next.title;
       if (hint.hidden) {
@@ -1042,8 +1050,8 @@
     }
   }
 
-  function scrollToNextEpisode() {
-    var next = scrollTarget();
+  function scrollToEpisode(dir) {
+    var next = scrollTarget(dir);
     if (!next) return false;
     S.switching = true;
     updateNextHint();
@@ -1056,11 +1064,12 @@
     img.style.height = frame.style.height;
     $("np-series").textContent = next.series;
     $("np-title").textContent = next.title;
-    peek.classList.remove("fade", "in");
+    peek.classList.remove("fade", "in", "from-top");
+    if (dir < 0) peek.classList.add("from-top");
     peek.hidden = false;
     void peek.offsetWidth;
     peek.classList.add("in");
-    player.classList.add("to-next");
+    player.classList.add(dir < 0 ? "to-prev" : "to-next");
     setTimeout(function () { openEpisode(next, { section: 0, viaScroll: true }); }, 800);
     return true;
   }
@@ -1075,8 +1084,8 @@
   function hideNextPeek() {
     var peek = $("next-peek");
     peek.hidden = true;
-    peek.classList.remove("in", "fade");
-    player.classList.remove("to-next");
+    peek.classList.remove("in", "fade", "from-top");
+    player.classList.remove("to-next", "to-prev");
     if (peekUrl) { URL.revokeObjectURL(peekUrl); peekUrl = null; }
   }
 
@@ -1084,11 +1093,12 @@
   function onWheel(e) {
     if (!S) return;
     var dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
-    if (dy <= 0) { wheelSum = 0; return; }
+    if (!dy) return;
+    if ((dy > 0) !== (wheelSum > 0)) wheelSum = 0;   // direction changed
     wheelSum += dy;                      // trackpads send many small deltas: add them up
     clearTimeout(wheelTimer);
     wheelTimer = setTimeout(function () { wheelSum = 0; }, 250);
-    if (wheelSum > 60) { wheelSum = 0; scrollToNextEpisode(); }
+    if (Math.abs(wheelSum) > 60) { var dir = wheelSum > 0 ? 1 : -1; wheelSum = 0; scrollToEpisode(dir); }
   }
 
   function attachSwipeUp(target) {
@@ -1101,13 +1111,13 @@
       if (sy === undefined) return;
       var t = e.changedTouches[0], dy = sy - t.clientY, dx = Math.abs(t.clientX - sx);
       sy = undefined;
-      if (dy > 60 && dx < dy * 0.6 && Date.now() - st < 800) scrollToNextEpisode();
+      if (Math.abs(dy) > 60 && dx < Math.abs(dy) * 0.6 && Date.now() - st < 800) scrollToEpisode(dy > 0 ? 1 : -1);
     }, { capture: true, passive: true });
   }
 
   player.addEventListener("wheel", onWheel, { passive: true });
   attachSwipeUp(player);
-  $("next-hint").addEventListener("click", function () { scrollToNextEpisode(); });
+  $("next-hint").addEventListener("click", function () { scrollToEpisode(1); });
   document.addEventListener("keydown", function (e) {
     if (!S) return;
     // keys while focus is in the host page rather than inside the episode frame
