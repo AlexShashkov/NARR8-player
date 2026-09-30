@@ -563,12 +563,31 @@
     }
   }
 
-  function bookEnded() {
-    if (!S || S.ended) return;
-    S.ended = true;
-    saveProgress(true);
+  // The end panel slides in a fixed time after the last scene starts, so its ending animation can play first.
+  var END_PANEL_DELAY = 8500;
+
+  function scheduleEndPanel() {
+    cancelEndPanel();
     var session = S;
-    setTimeout(function () { if (S === session) showEndCard(); }, 1500);
+    S.endTimer = setTimeout(function () {
+      if (S !== session) return;
+      S.endTimer = null;
+      S.ended = true;
+      saveProgress(true);
+      showEndCard();
+    }, END_PANEL_DELAY);
+  }
+
+  function cancelEndPanel() {
+    if (S && S.endTimer) { clearTimeout(S.endTimer); S.endTimer = null; }
+  }
+
+  // The engine says the book is over. Normally the panel is already scheduled from the last scene's start;
+  // this is only the fallback for episodes whose scene count is unknown.
+  function bookEnded() {
+    if (!S) return;
+    saveProgress(true);
+    if (!S.endTimer && !S.ended) { S.ended = true; showEndCard(); }
   }
 
   // --- the API the episode's engine talks to (see shim/navigation.js and shim/foreditor.js)
@@ -610,8 +629,13 @@
       if (!S) return;
       S.current = n;
       if (count) S.count = count;
-      if (n < S.count - 1 && S.ended) { S.ended = false; hideEndCard(false); }
       saveProgress(false);
+      if (S.count && n === S.count - 1) {
+        if (!S.endTimer && !S.ended) scheduleEndPanel();
+      } else {
+        cancelEndPanel();
+        if (S.ended) { S.ended = false; hideEndCard(false); }
+      }
     },
     sectionFinished: function (n) {
       if (S && S.count && n >= S.count - 1) bookEnded();
@@ -765,6 +789,48 @@
     "The pixels are the same ones people saw years ago. Only the screen got better.",
     "Remember when motion comics felt like the future? For a few minutes, they were again.",
     "Once upon a time, this was the newest episode in the store.",
+    // bittersweet
+    "The series never got its final episode. This one still deserves an ending, so here it is.",
+    "The studio closed its doors, but it left the lights on in these frames.",
+    "Some of these stories stopped mid-sentence when the company did. They still sound good out loud.",
+    "The people who drew this moved on long ago. Their work stayed behind to say hello.",
+    "It's strange how a story can outlive the place that made it.",
+    "The last update never came. This episode kept its promise anyway.",
+    "Somebody stayed late to animate this scene. They never knew you would be the one to see it.",
+    "The store is closed, the shelf is empty, and this episode is still here, a little defiant.",
+    "Not every story gets a proper goodbye. Consider this one.",
+    "The characters don't know their world was switched off for a decade. Don't tell them.",
+    "Every ending is a little sad. This one had to wait years to happen.",
+    "The people who made this are scattered across the world now. For a few minutes, their work was together again.",
+    "It was supposed to be a Tuesday episode among hundreds. It became one of the last ones left.",
+    "Somewhere, a half-finished next episode lives only in somebody's memory.",
+    "The applause never came for this one. Take a moment and clap anyway.",
+    "Nothing lasts forever, but some things last longer than anyone expected.",
+    "It's a small thing, a story coming back. It still feels like a big one.",
+    "This was made by people who believed motion comics were the future. For them, it was.",
+    "The credits roll to an empty theatre, and then someone like you walks in.",
+    "Endings are easier when you know the story can be read again.",
+    // longing
+    "Some places only exist inside a story. You can visit again whenever you like.",
+    "You'll miss these characters a little. That's how you know it was a good one.",
+    "There's a quiet after the last frame. Stay in it for a moment.",
+    "Somewhere, in a different timeline, the next episode is already out.",
+    "You can close the tab, but part of you will still be standing in that last scene.",
+    "It's hard to leave a world you only just got to know again.",
+    "Some stories feel like a place you lived once. This is one of those places.",
+    "The music is gone, but you can probably still hear it.",
+    "You'll think about this ending on some random evening. That's what stories are for.",
+    "What happens next? Only the frames know, and they're not telling.",
+    "It's okay to want one more episode. Everyone always did.",
+    "Leaving always feels too soon, even when the story has ended.",
+    "The characters wave goodbye from the last frame. They would like you to come back.",
+    "Some goodbyes are really just see-you-laters with nicer music.",
+    "You know the ending now. You'll still want to see it again.",
+    "There will always be one more scene you wish existed.",
+    "Close your eyes and the last frame is still there. It will be for a while.",
+    "The shelf is quiet, but the stories on it are waiting, patiently, for tonight.",
+    "Some worlds are too good to leave just once.",
+    "Until next time. It might be a while. The story will be right here.",
     // Claude
     "Claude rebuilt the missing player pieces for this. Claude would like you to know it read along.",
     "Claude never saw these comics in 2013. It is glad it got to see them now.",
