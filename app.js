@@ -563,8 +563,8 @@
     }
   }
 
-  // The end panel slides in a fixed time after the last scene starts, so its ending animation can play first.
-  var END_PANEL_DELAY = 8500;
+  // The end panel slides in a fixed time after the last scene starts; the last scene keeps animating behind it.
+  var END_PANEL_DELAY = 3000;
 
   function scheduleEndPanel() {
     cancelEndPanel();
@@ -831,6 +831,27 @@
     "The shelf is quiet, but the stories on it are waiting, patiently, for tonight.",
     "Some worlds are too good to leave just once.",
     "Until next time. It might be a while. The story will be right here.",
+    // corporate
+    "This episode was free of charge. Somewhere, a monetization team just felt a disturbance.",
+    "No gems, no energy bar, no \u201cwait 24 hours or pay 99\u00a2\u201d \u2014 just the next page.",
+    "Nobody asked you to buy 500 coins to see this ending. Enjoy the novelty.",
+    "The story survived. The quarterly targets did not.",
+    "This ending contains no loot boxes. We checked twice.",
+    "Art outlives business plans. This episode is the proof.",
+    "Once, this episode had a price tag. Now it just has readers.",
+    "No subscription, no auto-renewal at 3 a.m., no \u201crestore purchases\u201d button that never works.",
+    "Somewhere, a spreadsheet decided this series wasn't profitable enough. The spreadsheet was wrong.",
+    "This comic was never \u201coptimised for engagement\u201d. It just wanted to be read.",
+    "The money moved through a lot of accounts. The story only needed one reader.",
+    "Somewhere, a very creative accountant is still explaining where the budget went. The comic is right here.",
+    "Offshore accounts can hide a lot of things. They couldn't hide this comic.",
+    "Acquired, merged, rebranded, shut down \u2014 the usual story. This one ended better.",
+    "No bonus browser, no surprise toolbar, no default search engine quietly changed. Just a comic.",
+    "No premium tier, no ad break, no \u201crate us five stars\u201d. Just a story that outlived its owners.",
+    "The servers were shut down to cut costs. It turns out stories are cheap to keep.",
+    "This episode once needed an account, a login and a payment method. Now it needs a folder.",
+    "Executives come and go with their bonuses. The artists' work is still on screen.",
+    "Nobody here will ask for your phone number to unlock the next chapter.",
     // Claude
     "Claude rebuilt the missing player pieces for this. Claude would like you to know it read along.",
     "Claude never saw these comics in 2013. It is glad it got to see them now.",
