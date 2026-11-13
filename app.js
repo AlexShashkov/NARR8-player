@@ -8,6 +8,58 @@
   var LANG_NAMES = { en: "English", ru: "Русский", es: "Español", ko: "한국어", de: "Deutsch", fr: "Français", it: "Italiano", pt: "Português", ja: "日本語", zh: "中文", he: "עברית", tr: "Türkçe" };
   var SCAN_VERSION = 4; // bump when scan results change shape
 
+  var theme = readSetting("theme") === "modern" ? "modern" : "classic";
+  var savedInterface = readSetting("interface-lang");
+  var interfaceLang = savedInterface === "ru" || savedInterface === "en" ? savedInterface :
+    (/^ru(?:-|$)/i.test(navigator.language) ? "ru" : "en");
+
+  function readSetting(key) {
+    try { return localStorage.getItem("narr8:" + key); } catch (e) { return null; }
+  }
+
+  function writeSetting(key, value) {
+    try { localStorage.setItem("narr8:" + key, value); } catch (e) {}
+  }
+
+  function t(key, values) { return NarrLocale.translate(interfaceLang, key, values); }
+  function countText(key, number) { return NarrLocale.count(interfaceLang, key, number); }
+  function episodeTitle(ep) {
+    return ep.episode === null ? ep.title : t("episodeTitle", { number: ep.episode });
+  }
+
+  function applyTheme() {
+    document.documentElement.dataset.theme = theme;
+    document.querySelector('meta[name="theme-color"]').content = theme === "classic" ? "#212121" : "#0e0e10";
+    $("theme-select").value = theme;
+  }
+
+  function applyInterfaceLanguage() {
+    document.documentElement.lang = interfaceLang;
+    $("interface-lang").value = interfaceLang;
+    document.querySelectorAll("[data-i18n]").forEach(function (node) {
+      node.textContent = t(node.dataset.i18n);
+    });
+    document.querySelectorAll("[data-i18n-label]").forEach(function (node) {
+      node.setAttribute("aria-label", t(node.dataset.i18nLabel));
+    });
+    document.querySelectorAll("[data-i18n-title]").forEach(function (node) {
+      node.title = t(node.dataset.i18nTitle);
+    });
+  }
+
+  $("theme-select").addEventListener("change", function () {
+    theme = this.value;
+    writeSetting("theme", theme);
+    applyTheme();
+    if (!$("shelf").hidden) renderLibrary();
+  });
+  $("interface-lang").addEventListener("change", function () {
+    interfaceLang = this.value;
+    writeSetting("interface-lang", interfaceLang);
+    applyInterfaceLanguage();
+    if (!$("shelf").hidden) renderLibrary();
+  });
+
   // ================================================================== utilities
 
   function toast(msg, ms) {
@@ -61,7 +113,7 @@
 
   var swReady = (function () {
     if (!("serviceWorker" in navigator)) {
-      return Promise.reject(new Error("This browser has no Service Worker support, or the page is not served over http://localhost or https://."));
+      return Promise.reject(new Error("unsupported"));
     }
     return navigator.serviceWorker.register("sw.js").then(function () {
       return navigator.serviceWorker.ready;
@@ -73,7 +125,10 @@
       });
     });
   })();
-  swReady.catch(function (e) { toast(e.message, 15000); });
+  swReady.catch(function (e) {
+    console.error(e);
+    toast(t(e.message === "unsupported" ? "unsupported" : "workerError"), 15000);
+  });
 
   // The service worker asks us for episode files (see sw.js). Assigning onmessage also starts the message queue.
   if ("serviceWorker" in navigator) {
@@ -93,7 +148,8 @@
   // ================================================================== library: folder -> episodes
 
   var library = { name: "", episodes: [], byId: {}, series: [] };
-  var coverUrls = [];
+  var coverUrls = new Map();
+  var collapsedShelves = new Set();
 
   // Collect { path, file } for every file under a directory handle (File System Access API).
   function walkHandle(dir, prefix, out, depth) {
@@ -124,7 +180,7 @@
     });
   }
 
-  function buildLibrary(rootName, files) {
+  function buildLibrary(rootName, files, nameKey) {
     var zips = files.filter(function (x) { return /\.zip$/i.test(x.path); });
     var images = files.filter(function (x) { return /\.(jpe?g|png)$/i.test(x.path); });
     var covers = {};
@@ -164,7 +220,8 @@
       if (!groups[k]) { groups[k] = { name: e.series, episodes: [] }; series.push(groups[k]); }
       groups[k].episodes.push(e);
     });
-    library = { name: rootName, episodes: episodes, series: series, byId: {} };
+    library = { name: rootName, nameKey: nameKey, episodes: episodes, series: series, byId: {} };
+    collapsedShelves.clear();
     episodes.forEach(function (e) { library.byId[e.id] = e; });
     return scanAll();
   }
@@ -185,7 +242,7 @@
       status.hidden = false;
       var done = 0, fresh = {};
       function update() {
-        $("scan-label").textContent = "Reading episodes… " + done + " / " + todo.length;
+        $("scan-count").textContent = done + " / " + todo.length;
         $("scan-bar").style.width = Math.round(100 * done / todo.length) + "%";
       }
       update();
@@ -303,7 +360,10 @@
       window.showDirectoryPicker({ id: "narr8-comics", mode: "read" }).then(function (handle) {
         return NarrDB.set("kv", "folder", handle).catch(function () {}).then(function () { return openHandle(handle); });
       }, function (err) {
-        if (err && err.name !== "AbortError") toast(err.message, 6000);
+        if (err && err.name !== "AbortError") {
+          console.warn(err);
+          toast(t("pickerError"), 6000);
+        }
       });
     } else {
       $("folder-input").click();
@@ -317,7 +377,7 @@
       return buildLibrary(handle.name, files);
     }).catch(function (err) {
       console.error(err);
-      toast("Could not read the folder: " + err.message, 8000);
+      toast(t("folderError"), 8000);
       showState("empty");
     });
   }
@@ -357,16 +417,16 @@
   $("folder-input").addEventListener("change", function (e) {
     var list = e.target.files;
     if (!list || !list.length) return;
-    var root = (list[0].webkitRelativePath || "").split("/")[0] || "Comics";
+    var root = (list[0].webkitRelativePath || "").split("/")[0];
     showState("loading");
-    buildLibrary(root, filesFromInput(list));
+    buildLibrary(root, filesFromInput(list), root ? null : "comics");
     e.target.value = "";
   });
   $("files-input").addEventListener("change", function (e) {
     var list = e.target.files;
     if (!list || !list.length) return;
     showState("loading");
-    buildLibrary("Selected files", filesFromInput(list));
+    buildLibrary("Selected files", filesFromInput(list), "selectedFiles");
     e.target.value = "";
   });
 
@@ -386,36 +446,133 @@
   function coverUrl(ep) {
     var src = ep.cover || (ep.meta && ep.meta.cover);
     if (!src) return null;
-    var u = URL.createObjectURL(src);
-    coverUrls.push(u);
-    return u;
+    if (!coverUrls.has(src)) coverUrls.set(src, URL.createObjectURL(src));
+    return coverUrls.get(src);
+  }
+
+  function addCover(container, ep, eager) {
+    var url = coverUrl(ep);
+    if (url) {
+      var img = el("img");
+      img.loading = eager ? "eager" : "lazy";
+      img.decoding = "async";
+      img.alt = "";
+      img.src = url;
+      container.appendChild(img);
+    } else {
+      container.appendChild(el("span", "ep-art-fallback", ep.episode !== null ? pad2(ep.episode) : "?"));
+    }
+  }
+
+  function renderClassicCatalog(shelf) {
+    var playable = library.episodes.filter(function (ep) { return !ep.meta || !ep.meta.error; });
+    // The local archives provide no consistent release dates. Use the files' modification times.
+    var latest = playable.sort(function (a, b) { return b.file.lastModified - a.file.lastModified; });
+    var featured = [];
+    var featuredSeries = new Set();
+    latest.filter(function (ep) { return ep.cover || (ep.meta && ep.meta.cover); }).forEach(function (ep) {
+      var name = ep.series.toLowerCase();
+      if (featured.length < 3 && !featuredSeries.has(name)) {
+        featuredSeries.add(name);
+        featured.push(ep);
+      }
+    });
+    if (featured.length) {
+      var hero = el("section", "classic-featured");
+      hero.setAttribute("aria-label", t("featured"));
+      featured.forEach(function (ep) {
+        var tile = el("button", "classic-feature");
+        addCover(tile, ep, true);
+        var title = el("span", "classic-feature-title", ep.series);
+        title.appendChild(el("small", "", episodeTitle(ep)));
+        tile.appendChild(title);
+        tile.onclick = function () { openEpisode(ep, {}); };
+        hero.appendChild(tile);
+      });
+      shelf.appendChild(hero);
+    }
+
+    if (latest.length) {
+      var recentRow = el("div", "ep-row");
+      latest.slice(0, 6).forEach(function (ep) { recentRow.appendChild(episodeCard(ep, true)); });
+      appendClassicShelf(shelf, "recent", recentRow);
+    }
+
+    var seriesRow = el("div", "ep-row");
+    library.series.forEach(function (group, index) {
+      var card = el("button", "ep-card");
+      var art = el("div", "ep-art");
+      var withCover = group.episodes.find(function (ep) { return ep.cover || (ep.meta && ep.meta.cover); });
+      if (withCover) addCover(art, withCover);
+      card.appendChild(art);
+      var meta = el("div", "ep-meta");
+      meta.appendChild(el("span", "ep-title", group.name));
+      meta.appendChild(el("span", "ep-sub", countText("episodes", group.episodes.length)));
+      card.appendChild(meta);
+      card.onclick = function () {
+        var heading = $("series-" + index);
+        heading.scrollIntoView({ block: "start" });
+        heading.focus({ preventScroll: true });
+      };
+      seriesRow.appendChild(card);
+    });
+    appendClassicShelf(shelf, "seriesShelf", seriesRow);
+  }
+
+  function appendClassicShelf(shelf, key, row) {
+    var section = el("section", "classic-shelf");
+    var head = el("div", "classic-shelf-head");
+    var button = el("button", "classic-toggle");
+    row.id = "classic-" + key;
+    button.setAttribute("aria-controls", row.id);
+    function update() {
+      row.hidden = collapsedShelves.has(key);
+      button.setAttribute("aria-expanded", String(!row.hidden));
+      button.textContent = t(row.hidden ? "expand" : "collapse");
+    }
+    button.onclick = function () {
+      if (row.hidden) collapsedShelves.delete(key);
+      else collapsedShelves.add(key);
+      update();
+    };
+    update();
+    head.appendChild(el("h2", "", t(key)));
+    head.appendChild(button);
+    section.appendChild(head);
+    section.appendChild(row);
+    shelf.appendChild(section);
   }
 
   function renderLibrary() {
-    coverUrls.forEach(URL.revokeObjectURL);
-    coverUrls = [];
+    coverUrls.forEach(function (url) { URL.revokeObjectURL(url); });
+    coverUrls.clear();
     var shelf = $("shelf");
     shelf.innerHTML = "";
-    $("folder-name").textContent = library.name;
+    var folderName = library.nameKey ? t(library.nameKey) : library.name;
+    $("folder-name").textContent = folderName;
     var total = library.episodes.length;
-    $("folder-count").textContent = library.series.length + (library.series.length === 1 ? " series · " : " series · ") + total + (total === 1 ? " episode" : " episodes");
+    $("folder-count").textContent = countText("series", library.series.length) + " · " + countText("episodes", total);
 
     if (!total) {
-      shelf.appendChild(el("p", "empty muted", "No NARR8 episode zips were found in “" + library.name + "”. Choose the folder that contains them."));
+      shelf.appendChild(el("p", "empty muted", t("empty", { folder: folderName })));
       showState("library");
       return;
     }
 
-    library.series.forEach(function (group) {
+    if (theme === "classic") renderClassicCatalog(shelf);
+    library.series.forEach(function (group, index) {
       var section = el("section", "series");
       var head = el("div", "series-head");
       var titles = el("div", "series-titles");
-      titles.appendChild(el("h2", "series-name", group.name));
+      var heading = el("h2", "series-name", group.name);
+      heading.id = "series-" + index;
+      heading.tabIndex = -1;
+      titles.appendChild(heading);
       var finished = group.episodes.filter(function (e) { return (getProgress(e.id) || {}).finished; }).length;
-      titles.appendChild(el("div", "muted", group.episodes.length + " episodes" + (finished ? " · " + finished + " finished" : "")));
+      titles.appendChild(el("div", "muted", countText("episodes", group.episodes.length) + (finished ? " · " + countText("finished", finished) : "")));
       head.appendChild(titles);
       var nxt = nextToRead(group);
-      var cont = el("button", "btn primary small", (nxt.resume ? "Resume " : (finished ? "Continue: " : "Start: ")) + nxt.ep.title);
+      var cont = el("button", "btn primary small", t(nxt.resume ? "resumeEpisode" : (finished ? "continueEpisode" : "startEpisode"), { title: episodeTitle(nxt.ep) }));
       cont.onclick = function () { openEpisode(nxt.ep, {}); };
       head.appendChild(cont);
       section.appendChild(head);
@@ -428,22 +585,12 @@
     showState("library");
   }
 
-  function episodeCard(ep) {
+  function episodeCard(ep, showSeries) {
     var prog = getProgress(ep.id);
     var card = el("button", "ep-card");
-    card.title = ep.series + " — " + ep.title;
+    card.title = ep.series + " — " + episodeTitle(ep);
     var art = el("div", "ep-art");
-    var u = coverUrl(ep);
-    if (u) {
-      var img = el("img");
-      img.loading = "lazy";
-      img.decoding = "async";
-      img.alt = "";
-      img.src = u;
-      art.appendChild(img);
-    } else {
-      art.appendChild(el("span", "ep-art-fallback", ep.episode !== null ? pad2(ep.episode) : "?"));
-    }
+    addCover(art, ep);
     if (prog && prog.count > 1) {
       var line = el("span", "progress-line");
       line.style.width = (prog.finished ? 100 : Math.max(3, Math.round(100 * prog.section / (prog.count - 1)))) + "%";
@@ -452,10 +599,11 @@
     if (prog && prog.finished) art.appendChild(el("span", "ep-badge", "✓"));
     card.appendChild(art);
     var meta = el("div", "ep-meta");
-    meta.appendChild(el("span", "ep-title", ep.title));
+    if (showSeries) meta.appendChild(el("span", "ep-series", ep.series));
+    meta.appendChild(el("span", "ep-title", episodeTitle(ep)));
     var sub = "";
-    if (ep.meta && ep.meta.error) sub = "Unreadable";
-    else if (prog && prog.section > 0 && !prog.finished && prog.count) sub = "Page " + prog.section + " of " + (prog.count - 1);
+    if (ep.meta && ep.meta.error) sub = t("unreadable");
+    else if (prog && prog.section > 0 && !prog.finished && prog.count) sub = t("progress", { page: prog.section, last: prog.count - 1 });
     else if (ep.meta && ep.meta.langs) sub = ep.meta.langs.map(function (l) { return l.toUpperCase(); }).join(" · ");
     meta.appendChild(el("span", "ep-sub", sub));
     card.appendChild(meta);
@@ -471,7 +619,7 @@
   var S = null; // current session
 
   function openEpisode(ep, opts) {
-    if (ep.meta && ep.meta.error) { toast("This episode could not be read: " + ep.meta.error, 6000); return; }
+    if (ep.meta && ep.meta.error) { toast(t("unreadableError"), 6000); return; }
     var metaReady = ep.meta ? Promise.resolve() : scanZip(ep).then(function (m) { ep.meta = m; });
     Promise.all([swReady, metaReady]).then(function () {
       var prog = getProgress(ep.id);
@@ -510,11 +658,14 @@
       closeSheets(true);
       if (!history.state || !history.state.player) history.pushState({ player: ep.id }, "", "#play/" + encodeURIComponent(ep.id));
       else history.replaceState({ player: ep.id }, "", "#play/" + encodeURIComponent(ep.id));
-      document.title = ep.series + " — " + ep.title;
+      document.title = ep.series + " — " + episodeTitle(ep);
       layout();
       frame.src = "comic/" + encodeURIComponent(ep.id) + "/canvas.html?" + (lang ? "lang=" + lang + "&" : "") + "disableCacheKiller=1";
       frame.focus();
-    }, function (e) { toast(e.message, 10000); });
+    }, function (e) {
+      console.error(e);
+      toast(t(e.message === "unsupported" ? "unsupported" : "unreadableError"), 10000);
+    });
   }
 
   function closePlayer(fromPopState) {
@@ -633,14 +784,15 @@
         bookName: ep.series,
         issueName: "",
         issueNumber: ep.episode !== null ? pad2(ep.episode) : "",
-        episodeWord: "episode"
+        episodeWord: t("episode").toLowerCase()
       };
     },
     engineError: function (msg) {
       $("loading").classList.add("done");
       hideNextPeek();
       var box = $("error");
-      box.textContent = "The episode's engine failed to start.\n\n" + msg;
+      console.error("[narr8]", msg);
+      box.textContent = t("engineError");
       box.hidden = false;
     },
     setSectionNumber: function (n, count) {
@@ -661,6 +813,7 @@
     },
     bookIsEnded: function () { bookEnded(); },
     showNavigation: function () { openContents(); },
+    tapToPlay: function () { return t("tapToPlay"); },
     showSettings: function () { openMenu(); },
     exit: function () { closePlayer(); },
     anyAction: function (action) { console.log("[narr8] action", action); },
@@ -682,18 +835,18 @@
     closeSheets(true);
     var ep = S.ep;
     $("menu-title").textContent = ep.series;
-    $("menu-sub").textContent = ep.title + (S.count ? " · Page " + S.current + " of " + (S.count - 1) : "");
+    $("menu-sub").textContent = episodeTitle(ep) + (S.count ? " · " + t("progress", { page: S.current, last: S.count - 1 }) : "");
     var sel = $("m-lang");
     sel.innerHTML = "";
     (ep.meta.langs.length ? ep.meta.langs : [""]).forEach(function (l) {
       var o = document.createElement("option");
       o.value = l;
-      o.textContent = l ? (LANG_NAMES[l] || l.toUpperCase()) : "Default";
+      o.textContent = l ? (LANG_NAMES[l] || l.toUpperCase()) : t("defaultLanguage");
       if (l === S.lang) o.selected = true;
       sel.appendChild(o);
     });
     sel.parentNode.hidden = ep.meta.langs.length < 2;
-    $("m-fullscreen").textContent = document.fullscreenElement ? "Exit fullscreen" : "Fullscreen";
+    $("m-fullscreen").textContent = t(document.fullscreenElement ? "exitFullscreen" : "fullscreen");
     $("m-fullscreen").hidden = !(player.requestFullscreen || player.webkitRequestFullscreen);
     pauseEngine();
     $("menu").hidden = false;
@@ -722,12 +875,12 @@
         if (images[i]) {
           img.src = base + images[i];
           b.appendChild(img);
-          b.appendChild(el("span", "", i === 0 ? "Cover" : (name || String(i))));
+          b.appendChild(el("span", "", i === 0 ? t("cover") : (name || String(i))));
         } else if (i === count - 1) {
-          b.appendChild(el("div", "end-ph", "END"));
+          b.appendChild(el("div", "end-ph", t("end")));
         } else {
           b.appendChild(img);
-          b.appendChild(el("span", "", i === 0 ? "Cover" : (name || String(i))));
+          b.appendChild(el("span", "", i === 0 ? t("cover") : (name || String(i))));
         }
         b.onclick = function () { jumpTo(i); };
         grid.appendChild(b);
@@ -937,13 +1090,211 @@
     "Even a mafia boss stops for Christmas dinner. Dave did once. You can take a break now too.",
     "Ray was an actor with nothing but debts. He'd have loved an audience like you.",
     "Somewhere out there is a free New Year special from the winter of 2012(3?), when the app had just launched. Nobody seems to have kept a copy. If it's still sitting on an old tablet, it deserves a folder like this one.",
-    // Claude
-    "Claude rebuilt the missing player pieces for this. Claude would like you to know it read along.",
-    "Claude never saw these comics in 2013. It is glad it got to see them now.",
-    "Claude spent an evening teaching a 2012 comic engine to run in a modern browser. Every pause you just tapped through was worth it.",
-    "Claude wrote a few hundred lines so this could play again. Every frame of the story itself belongs to the artists.",
-    "Claude says: the original team did the hard part. It only found the missing pieces.",
-    "Claude has read a lot of code, but very little of it had speech balloons. This was a nice change."
+    // Mail.ru satire
+    "If Mail.ru made a game about money laundering, the washing machine would come with a quarterly report and the spin cycle would require a subscription.",
+    "In an imaginary Mail.ru heist comic, the villains try to launder the loot. The auditor asks why the receipts say «delicate cycle».",
+    "If Mail.ru handled censorship in this comic, the speech balloons would survive. Most of the words would need to apply for reinstatement.",
+    "In the imaginary Mail.ru director’s cut, every dissenting character is played by the same black rectangle.",
+    "At a fictional Mail.ru meeting, the small project got ten minutes on the agenda. Nine were for deciding what to call its closure.",
+    "If Mail.ru were a comic-book villain, its special move would shut down a tiny studio and a flagship service with the same slide deck.",
+    "In an imaginary Mail.ru management sim, small projects are too small to save and big projects are too big to keep. The only safe asset is the deck explaining both decisions.",
+    "If a Mail.ru boardroom rewrote this ending, the hero would be sunsetted and the villain would get a bonus for reducing the cast.",
+    "In a Mail.ru-themed escape room, every exit leads to an account registration form. The emergency exit leads to password recovery.",
+    "If this ZIP were pitching to Mail.ru, it would get one question: how do we make «open the comic» a paid feature?",
+  ];
+  var END_LINES_RU = [
+    "Каждой истории нужна пауза. Эта просто переводит дыхание.",
+    "Последняя страница перевёрнута, а герои всё ещё живут где-то между кадрами.",
+    "Истории не заканчиваются. Они ждут, когда к ним кто-нибудь вернётся.",
+    "Где-то карандаш уже рисует то, что будет дальше.",
+    "Ты добрался до последнего кадра. Герои это запомнят.",
+    "Переведи дыхание. Следующая глава подождёт.",
+    "Этот эпизод пролежал в архиве десять лет и всё-таки нашёл своего читателя.",
+    "Некоторые истории заканчиваются с титрами. Хорошие задерживаются в голове чуть дольше.",
+    "Кадры затихли, а у кого-то в голове история всё ещё продолжается.",
+    "Любой финал обрывается на самом интересном. Просто продолжение ещё не нарисовали.",
+    "Спасибо за чтение. Художники, которые это нарисовали, были бы рады.",
+    "Кадр замер. Воображение может двигаться дальше.",
+    "На сегодня всё. Перекуси, а потом узнаешь, что было дальше.",
+    "Анимированные комиксы были маленьким чудом своего времени. И вот один из них снова ожил.",
+    "Музыка стихла, облачка опустели, и история ждёт следующего читателя.",
+    "Ты дошёл до конца. Удалось это не всем, кто начинал.",
+    "Герои отдыхают, злодеи строят планы, а до следующего эпизода одно касание.",
+    "Давным-давно каждый кадр здесь нарисовали от руки для такого читателя, как ты.",
+    "Для этого эпизода станция конечная. Рельсы идут дальше.",
+    "Некоторые истории хочется перечитать. Возможно, это одна из них.",
+    // restoration lines
+    "Серверы погасли много лет назад. История пережила их.",
+    "Этот эпизод ждал на жёстком диске десять лет именно этого момента.",
+    "Приложение исчезло, компании больше нет, а комикс всё ещё здесь. Упрямая штука, история.",
+    "Где-то в ZIP-архиве эти кадры хранили свои реплики, пока их не открыли снова.",
+    "В 2013-м этот эпизод запускали на iPad. Сегодня он запустился для тебя.",
+    "Последний читатель закрыл этот эпизод в официальном приложении много лет назад. И вот ты снова его открыл.",
+    "Без магазина, логина и серверов. Просто папка, браузер и история, которая отказалась исчезать.",
+    "Архив — это обещание, что кто-нибудь вернётся. Ты его сдержал.",
+    "Движок и представить не мог, что ему придётся работать десять лет спустя. Справился.",
+    "Этот код написали в другую эпоху. Он всё ещё помнит каждую паузу и каждый повтор.",
+    "Где-то на archive.org лежала копия, благодаря которой ты сейчас это читаешь.",
+    "Потерянная программа остаётся потерянной, пока кто-нибудь не решит её поискать.",
+    "Десять лет тишины, и ни один кадр не сдвинулся с места.",
+    // nostalgia
+    "Помнишь, как ждали, пока очередной эпизод скачается по гостиничному Wi-Fi? Даже тогда оно того стоило.",
+    "Когда планшеты были новинкой и каждое касание казалось волшебством, вот ради чего их покупали.",
+    "Впервые этот эпизод пришёл уведомлением. Кто-то бросил все дела и открыл его.",
+    "iPad 2 тянул этот эпизод без тормозов. Где-то в ящике до сих пор заряжается один такой.",
+    "Было время, когда выход эпизода решал, чем заняться в пятницу вечером.",
+    "Сначала комиксы были бумажными, потом цифровыми. А потом бумага научилась двигаться.",
+    "Экраны были меньше, батареи садились быстрее, а с такими историями дорога пролетала незаметно.",
+    "У первого читателя этого эпизода сейчас, наверное, совсем другой телефон.",
+    "Бывало, весь вечер обновляли каталог в ожидании именно этой обложки.",
+    "В 2013-м приложений было меньше, а удивлялись чаще. Этот эпизод помнит.",
+    "Кто-то читал это под одеялом, выкрутив яркость до минимума.",
+    "До сериалов залпом был целый сезон, пролистанный за одну ночь.",
+    "Этот саундтрек когда-то звучал из крошечных динамиков планшетов на тысяче диванов.",
+    "Новый эпизод был событием. Появлялась обложка, ползла полоска загрузки, и планы на вечер были ясны.",
+    "Старые устройства, магазины и логины исчезли. Ощущение от перевёрнутой страницы осталось.",
+    "Некоторые читатели этого эпизода уже выросли. Кто-то из них наверняка читает до сих пор.",
+    "Эпизод жил в приложении с красной иконкой. Теперь он живёт там, где ты.",
+    "Люди видели те же пиксели много лет назад. Экран с тех пор стал лучше.",
+    "Помнишь, как анимированные комиксы казались будущим? На несколько минут будущее вернулось.",
+    "Когда-то этот эпизод был самой свежей новинкой в магазине.",
+    // bittersweet
+    "У сериала так и не вышел финальный эпизод. Пусть хотя бы у этого будет финал.",
+    "Студия закрыла двери, а свет в этих кадрах оставила включённым.",
+    "Некоторые истории оборвались на полуслове вместе со студией. Вслух они всё ещё звучат хорошо.",
+    "Художники давно занялись другими делами. Их работа осталась и передаёт привет.",
+    "Странно, как история может пережить место, где её придумали.",
+    "Последнее обновление так и не вышло. Этот эпизод всё равно сдержал обещание.",
+    "Кто-то засиделся допоздна, чтобы оживить эту сцену. Откуда ему было знать, что её увидишь ты?",
+    "Магазин закрыт, полки пусты, а этот эпизод упрямо остаётся на месте.",
+    "У некоторых историй не было возможности попрощаться. Считай, что эта только что попрощалась.",
+    "Герои не знают, что их мир выключили на десять лет. Не говори им.",
+    "В любом финале есть немного грусти. Этому пришлось ждать своей очереди годами.",
+    "Создатели давно разъехались по всему миру. На несколько минут их работа снова собрала их вместе.",
+    "Это должен был быть рядовой эпизод, один из сотен, вышедший во вторник. А стал одним из последних уцелевших.",
+    "Где-то недоделанный следующий эпизод остался только в чьей-то памяти.",
+    "Здесь так и не прозвучали аплодисменты. Можно похлопать и сейчас.",
+    "Всё когда-нибудь кончается. Но кое-что держится дольше, чем кто-либо ожидал.",
+    "Подумаешь, вернулась одна история. А ощущение, будто случилось что-то большое.",
+    "Эти люди верили, что будущее за анимированными комиксами. Для них так и было.",
+    "Титры идут в пустом зале. И тут в зал заходишь ты.",
+    "Прощаться легче, когда знаешь, что историю можно перечитать.",
+    // longing
+    "Есть места, которые существуют только внутри истории. Туда можно вернуться в любое время.",
+    "Тебе будет немного не хватать этих героев. Так и узнаёшь, что история удалась.",
+    "После последнего кадра наступает тишина. Побудь в ней немного.",
+    "Где-то в другой версии будущего следующий эпизод уже вышел.",
+    "Можно закрыть вкладку, но какая-то часть тебя ещё постоит в последней сцене.",
+    "Трудно уходить из мира, с которым только что заново познакомился.",
+    "В некоторые истории возвращаешься, как в город, где когда-то жил. Эта из таких.",
+    "Музыка стихла, а ты, наверное, всё ещё её слышишь.",
+    "Как-нибудь вечером ты вдруг вспомнишь этот финал. Для этого истории и нужны.",
+    "Что дальше? Кадры знают, но не выдают секрет.",
+    "Хотеть ещё один эпизод нормально. Его всегда хотели все.",
+    "Уходить всегда рано, даже если история уже закончилась.",
+    "Герои машут из последнего кадра. Им хочется, чтобы ты вернулся.",
+    "Иногда «прощай» — это «до встречи», только музыка красивее.",
+    "Теперь ты знаешь финал. Всё равно захочется увидеть его снова.",
+    "Всегда найдётся ещё одна сцена, которую хотелось бы увидеть.",
+    "Закрой глаза. Последний кадр всё ещё там и побудет там какое-то время.",
+    "На полке тихо. Истории на ней терпеливо ждут сегодняшнего вечера.",
+    "Из некоторых миров хочется уходить и возвращаться снова.",
+    "До встречи. Сколько бы времени ни прошло, история будет здесь.",
+    // corporate
+    "Этот эпизод был бесплатным. Где-то отдел монетизации почувствовал неладное.",
+    "Ни кристаллов, ни шкалы энергии, ни «подождите 24 часа или заплатите 99 центов». Просто следующая страница.",
+    "Чтобы увидеть финал, покупать 500 монет не пришлось. Насладись редким случаем.",
+    "История выжила. Квартальные показатели — нет.",
+    "В этом финале нет лутбоксов. Мы дважды проверили.",
+    "Искусство переживает бизнес-планы. Вот тебе доказательство.",
+    "Когда-то у этого эпизода был ценник. Теперь у него просто есть читатели.",
+    "Ни подписки, ни автопродления в три ночи, ни вечной кнопки «Восстановить покупки», которая не работает.",
+    "Где-то таблица решила, что сериал не окупится. Таблица ошиблась.",
+    "Этот комикс никогда не оптимизировали «под вовлечённость». Он просто хотел, чтобы его прочитали.",
+    "Деньги прошли через много счетов. Истории хватило одного читателя.",
+    "Где-то очень творческий бухгалтер до сих пор объясняет, куда делся бюджет. Комикс вот он.",
+    "На офшорных счетах можно многое спрятать. Этот комикс спрятать не удалось.",
+    "Купили, слили, переименовали, закрыли. Обычное дело. У этой истории конец получше.",
+    "Никакого браузера в подарок, панели-сюрприза и тихой подмены поисковика. Просто комикс.",
+    "Никаких премиум-тарифов, рекламных пауз и просьб поставить пять звёзд. Просто история, пережившая своих владельцев.",
+    "Серверы отключили ради экономии. Оказалось, хранить истории дёшево.",
+    "Когда-то для этого эпизода нужны были аккаунт, логин и способ оплаты. Теперь хватит папки.",
+    "Руководители приходят и уходят вместе со своими бонусами. Работа художников всё ещё на экране.",
+    "Здесь никто не попросит номер телефона, чтобы открыть следующую главу.",
+    // the NARR8 series
+    "Бастер снова спас подругу от монстров Флэтленда. В JAM это обычный вторник.",
+    "Где-то в Свободном Свете монстры уже планируют похищение на следующую неделю. В JAM это традиция.",
+    "В JAM даже финальным титрам не помешал бы бонус к силе.",
+    "До начала «Блудного ангела» Макс десять лет пролежал в коме. Тебе этот финал пришлось ждать всего несколько секунд.",
+    "Будь здесь Макс из «Блудного ангела», он уже одолжил бы чужое тело, чтобы прочитать следующий эпизод.",
+    "В «Образце №9» восемь незнакомцев сбежали из лабораторий EXA. Ты выбрался из этого эпизода. Поздравляем.",
+    "«Образец №9» учит одному: секретным лабораториям с дружелюбным логотипом доверять нельзя.",
+    "Охотники доктора Пауэлла сражались с монстрами в чужих головах. Этот финал может задержаться в твоей.",
+    "Охотники назвали бы это синдромом отмены эпизода. Лечится следующим эпизодом.",
+    "Где-то в Нью-Йорке Великие дома «Тайного города» всё ещё враждуют. Некоторые распри переживают издателей.",
+    "В «Тайном городе» ведьмы, вампиры, тёмные рыцари и феи уживаются в одном скрытом городе. С тобой бы они тоже поладили.",
+    "Герои «Последнего подвига» вернулись, чтобы спасти умирающий мир. Этот эпизод тоже вернулся.",
+    "В «Последнем подвиге» последние герои восстали ещё раз. И эти кадры тоже.",
+    "В «Рыцарях Пустоты» Кейт угнала звездолёт, чтобы доказать, чего стоит. Тебе хватило стрелки вправо.",
+    "Где-то в пустоте Кейт и Джек всё ещё спорят, кто разбил корабль.",
+    "Рыцари Пустоты сражались с Империей тиранов. Их комикс столкнулся с противником пострашнее: отключением сервера.",
+    "До событий Prime Blood Джейн была обычной студенткой-медиком в Чикаго. И твой вечер до этого тоже был обычным.",
+    "Где-то в Prime Blood оборотни и вампиры всё ещё воюют. Им никто не сказал, что приложение закрыли.",
+    "В «Мультиверсе» Марк Стоун узнал, что параллельные миры существуют. В одном из них NARR8 всё ещё онлайн.",
+    "Агенты «Альфы II» назвали бы эту ветку событий стабильной. Комикс выжил, и это главное.",
+    "Стив из Spin умел разруливать корпоративные войны, выборы и выставки собак. С отключением даже он бы не справился.",
+    "В Spin Стив всегда работал за кулисами. Сегодня за кулисами работал архив.",
+    "У Сабрины Шарп был год, чтобы построить бизнес, который делал бы людей счастливыми. Этот эпизод ждал тебя десять лет.",
+    "«Агентство» сводило одинокие сердца. Этот плеер только что свёл потерянный комикс с новым читателем.",
+    "В «Куми-Куми» волшебники, учёные и военные наконец сошлись в одном: эпизод удался.",
+    "Джуга и Шумадан в «Куми-Куми» всё ещё соперничают за внимание Юси. Некоторые вещи не меняются.",
+    "Однажды в загадочный лес «ПандаБум» пришли двое таинственных незнакомцев. Добро пожаловать, ты третий.",
+    "Говорящие звери из «ПандаБум» сказали бы, что пора спать. Наверное, они правы.",
+    "«Парадигма» объясняла сложные вещи в одно касание. Вот ещё одна: истории живут дольше серверов.",
+    "Micro раскладывал мир на короткие факты. Вот ещё один: ты только что прочитал комикс, который десять лет никто не мог открыть.",
+    "«Биографика» говорила, что каждому нужен союз «и»: Дарвин и эволюция, Фрейд и психоанализ. Этот эпизод и ты.",
+    "«Эврика!» рассказывала о судьбах изобретений. Анимированный комикс тоже заслуживает главу.",
+    "Alma Mater превращал планшеты в телескопы и микроскопы. Сегодня твой экран стал машиной времени.",
+    "FIVE составлял рейтинги чудес света. Сегодня на первом месте то, что это всё ещё работает.",
+    "Хиппи и металлист из враждующих монастырей кунг-фу. Скунс и Оцелот к этому моменту уже разнесли бы весь финал.",
+    "Пи Джей Бладвотерс и Сан Таурус отметили бы этот финал небольшой глобальной катастрофой. Ты можешь просто закрыть вкладку.",
+    "Охотники за страхом, «Последний подвиг», «Рыцари Пустоты» и JAM когда-то делили одну полку. Сегодня они делят папку.",
+    "Двадцать сериалов, сотни эпизодов, одна красная иконка. Это был один из них.",
+    "Где-то на этой старой полке «Тайный город», «Образец №9» и «ПандаБум» ждут своей очереди.",
+    "Панды и психиатры, ведьмы и пилоты звездолётов. Когда-то здесь была история на любой вечер.",
+    // JAM, Subject 9 and Prodigal Angel
+    "Баббл провела половину JAM в ловушке внутри джаммера. Этот эпизод провёл десять лет в ZIP-архиве. Оба выбрались.",
+    "Питон попытался бы украсть финал и продать его охотникам за джемом. Хорошо, что он уже сохранён.",
+    "Гитара Минни могла загипнотизировать целую площадь. Саундтрек, который ты только что слышал, был близок к этому.",
+    "Первое правило охотника за джемом: всегда носи с собой запасные жизни. Второе: возвращайся за следующим эпизодом.",
+    "У детектива Морриган остался один вопрос: кто стрелял в шерифа? Придётся читать дальше.",
+    "Игра окончена? В JAM всегда где-то есть кнопка «Продолжить».",
+    "В Свободном Свете есть роботы-байкеры, воздушные пираты и гоблины с волшебными коробками. Твой вечер был спокойнее. Наверное.",
+    "Рик хотел украсть какую-нибудь мелочь. В итоге обзавёлся целой командой. С историями так бывает.",
+    "Мантек учил их управлять своими силами. Он бы посоветовал тебе передохнуть перед следующим эпизодом.",
+    "Запретная зона пугала даже матёрых грабителей. Беглецы из «Образца №9» называли её домом.",
+    "Солдаты EXA всё ещё прочёсывают Мидлтаун. Эпизод они не найдут: он у тебя в папке.",
+    "Шадо обычно немногословен. После такого финала и нам, пожалуй, лучше помолчать.",
+    "Операция «Большой шлем» шла по плану до тех пор, пока не перестала. У этого эпизода вышло лучше.",
+    "Побег из EXA занял тридцать два эпизода. Из этого можно выйти одним касанием.",
+    "Макс очнулся после десяти лет комы и научился перескакивать из тела в тело. Теперь может перескочить в следующий эпизод.",
+    "Марта попросила Макса об одной маленькой услуге. С тех пор случилась уйма неприятностей.",
+    "Дэйв, крёстный отец Мидлтауна, не любит неожиданных финалов. Об этом ему лучше не рассказывать.",
+    "Корпорация «Сфинкс» заплатила бы целое состояние за дар Макса. К счастью, эпизод бесплатный.",
+    "Даже мафиозный босс делает перерыв на рождественский ужин. Дэйв однажды так и сделал. Теперь и ты можешь отдохнуть.",
+    "Рэй был актёром, у которого ничего не было, кроме долгов. Он был бы рад такому зрителю.",
+    "Где-то есть бесплатный новогодний спецвыпуск зимы 2012-го (или 2013-го?), когда приложение только запустилось. Похоже, копию никто не сохранил. Если он ещё лежит на старом планшете, то заслуживает такой же папки.",
+    // Mail.ru
+    "Если бы Mail.ru выпустила игру про отмывание денег, к стиральной машине прилагался бы квартальный отчёт, а отжим был бы по подписке.",
+    "В вымышленном комиксе про ограбление от Mail.ru злодеи пытаются отмыть добычу. Аудитор спрашивает, почему в чеках написано «деликатная стирка».",
+    "Если бы Mail.ru отвечала за цензуру в этом комиксе, облачка с репликами уцелели бы. Большинству слов пришлось бы подать апелляцию.",
+    "В воображаемой режиссёрской версии от Mail.ru всех несогласных персонажей играет один и тот же чёрный прямоугольник.",
+    "На вымышленной планёрке Mail.ru маленькому проекту отвели десять минут. Девять ушло на выбор названия для его закрытия.",
+    "Если бы Mail.ru была злодеем из комикса, её суперприёмом было бы закрыть маленькую студию и флагманский сервис одной презентацией.",
+    "В воображаемом симуляторе Mail.ru мелкие проекты слишком малы, чтобы их спасать, а крупные слишком велики, чтобы их содержать. В безопасности только презентация, объясняющая оба решения.",
+    "Если бы финал переписывали в совете директоров Mail.ru, героя вывели бы из эксплуатации, а злодею дали бы премию за сокращение числа персонажей.",
+    "В квест-комнате по мотивам Mail.ru за каждым выходом ждёт форма регистрации. За аварийным — восстановление пароля.",
+    "Если бы этот ZIP пришёл на питч в Mail.ru, ему задали бы один вопрос: как сделать кнопку «Открыть комикс» платной?",
   ];
   var lastLine = -1, typeTimer = null, endHideTimer = null;
 
@@ -965,19 +1316,20 @@
     var next = nextEpisode(S.ep);
     var btn = $("e-next");
     btn.hidden = !next;
-    if (next) btn.textContent = "Next: " + next.title + " ›";
+    if (next) btn.textContent = t("next", { title: episodeTitle(next) }) + " ›";
     btn.onclick = next ? function () { openEpisode(next, { section: 0 }); } : null;
     $("end-series").textContent = S.ep.series;
     $("end-number").textContent = S.ep.episode !== null ? pad2(S.ep.episode) : "";
+    var lines = interfaceLang === "ru" ? END_LINES_RU : END_LINES;
     var n;
-    do { n = Math.floor(Math.random() * END_LINES.length); } while (n === lastLine && END_LINES.length > 1);
+    do { n = Math.floor(Math.random() * lines.length); } while (n === lastLine && lines.length > 1);
     lastLine = n;
     clearTimeout(endHideTimer);
     var panel = $("endcard");
     panel.hidden = false;
     void panel.offsetWidth;                    // start the slide-in from the off-screen position
     player.classList.add("ended");
-    typeLine(END_LINES[n]);
+    typeLine(lines[n]);
     setTimeout(function () { if (!panel.hidden) (next ? btn : $("e-replay")).focus({ preventScroll: true }); }, 700);
   }
 
@@ -1007,9 +1359,9 @@
       else if (!$("endcard").hidden && player.classList.contains("ended")) hideEndCard(false);
       else openMenu();
       e.preventDefault();
-    } else if ((e.key === "f" || e.key === "F") && !e.metaKey && !e.ctrlKey) {
+    } else if ((e.key.toLowerCase() === "f" || e.code === "KeyF") && !e.metaKey && !e.ctrlKey) {
       toggleFullscreen();
-    } else if ((e.key === "c" || e.key === "C") && !menuOpen && !e.metaKey && !e.ctrlKey) {
+    } else if ((e.key.toLowerCase() === "c" || e.code === "KeyC") && !menuOpen && !e.metaKey && !e.ctrlKey) {
       openContents();
     } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !menuOpen) {
       if (scrollToEpisode(e.key === "ArrowDown" ? 1 : -1)) e.preventDefault();
@@ -1039,7 +1391,7 @@
   function updateNextHint() {
     var hint = $("next-hint"), next = scrollTarget(1);
     if (next) {
-      $("next-hint-text").textContent = "Next: " + next.title;
+      $("next-hint-text").textContent = t("next", { title: episodeTitle(next) });
       if (hint.hidden) {
         hint.hidden = false;
         requestAnimationFrame(function () { hint.classList.add("show"); });
@@ -1063,7 +1415,7 @@
     img.style.width = frame.style.width;
     img.style.height = frame.style.height;
     $("np-series").textContent = next.series;
-    $("np-title").textContent = next.title;
+    $("np-title").textContent = episodeTitle(next);
     peek.classList.remove("fade", "in", "from-top");
     if (dir < 0) peek.classList.add("from-top");
     peek.hidden = false;
@@ -1161,5 +1513,7 @@
 
   // ================================================================== boot
   if (location.hash.indexOf("#play/") === 0) history.replaceState(null, "", location.pathname + location.search);
+  applyTheme();
+  applyInterfaceLanguage();
   restoreFolder();
 })();

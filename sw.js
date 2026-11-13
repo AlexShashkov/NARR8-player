@@ -6,8 +6,8 @@
 //
 // The page answers "narr8-file" messages (see app.js). Keeping the File handles in the page, not here, means the
 // browser can stop this worker whenever it likes without losing anything.
-var SHELL_CACHE = "narr8-shell-v3";
-var SHELL_FILES = ["./", "index.html", "app.js", "zip.js", "db.js", "style.css",
+var SHELL_CACHE = "narr8-shell-v5";
+var SHELL_FILES = ["./", "index.html", "app.js", "zip.js", "db.js", "locale.js", "style.css", "classic.css",
   "shim/navigation.js", "shim/foreditor.js", "shim/video.js", "shim/mouse.js", "shim/audioController.js"];
 
 // Engine files that some episodes left out of their zip; served from the player instead (see shim/audioController.js).

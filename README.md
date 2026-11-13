@@ -68,6 +68,10 @@ To stop the server, press `Ctrl+C` in the terminal.
 
 The app is plain static files, with no build step and no backend. It can be published as is on GitHub Pages, Netlify, or any web host. Visitors still pick comics from their own disk.
 
+## Appearance and language
+
+The library opens in the Classic theme by default. Use the controls in the header to switch themes or choose English or Russian for the interface. The player remembers both choices. Classic uses covers from your local collection and lists the latest episodes by file modification date. Set the comic's language in the episode menu.
+
 ## Controls
 
 | Action | Mouse / keyboard | Touch |
@@ -97,7 +101,7 @@ The episodes use two engine generations, and both are supported. Of the 86 episo
 
 The rest of the app:
 
-- `index.html`, `app.js`, `style.css`: the library, folder scanning, and the player UI around the episode frame.
+- `index.html`, `app.js`, `locale.js`, `style.css`, `classic.css`: the library, folder scanning, and the player UI around the episode frame.
 - `sw.js`: a Service Worker that makes a zip on your disk look like a web folder to the episode's engine. It supports HTTP Range requests for video seeking.
 - `zip.js`: a small dependency-free zip reader built on the browser's `DecompressionStream`.
 - `db.js`: remembers the chosen folder and caches scan results in IndexedDB.

@@ -152,7 +152,10 @@
     overlay = document.createElement("div");
     overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;" +
       "background:rgba(0,0,0,.55);color:#fff;font:600 20px/1.3 system-ui,sans-serif;cursor:pointer;-webkit-user-select:none;user-select:none";
-    overlay.innerHTML = '<div style="padding:18px 28px;border:2px solid rgba(255,255,255,.8);border-radius:999px">&#9654;&nbsp; Tap to play</div>';
+    var label = document.createElement("div");
+    label.style.cssText = "padding:18px 28px;border:2px solid rgba(255,255,255,.8);border-radius:999px";
+    label.textContent = "▶ " + (host && host.tapToPlay ? host.tapToPlay() : "Tap to play");
+    overlay.appendChild(label);
     var go = function (e) {
       e.preventDefault(); e.stopPropagation();
       var list = blocked; blocked = [];
